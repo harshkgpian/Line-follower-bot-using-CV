@@ -1,15 +1,11 @@
-
-import cvzone
 from cvzone.ColorModule import ColorFinder
 import cv2
 import numpy as np
-import matplotlib.pyplot as plt
 import os, sys
 import traceback
 import math
 import time
 import sys
-from simple_pid import PID
 
 
 ##############################################################
@@ -84,61 +80,63 @@ def encoders(client_id):
 	return joints_position
 
 def task_primary(client_id):
-	set_bot_movement(client_id, init_setup(client_id), -1,0,0)
 	image_data(client_id)
-
-def f(x):
-	return 98.8889*x**3-154.3333*x**2+54.4444*x+4
-def image_data(client_id):
+	# play(client_id)
 	
-	w = 0
-	kp = 1.05
-	ki = 0.8
-	kd = 0.8
-	hsvVals = {'hmin': 0, 'smin': 0, 'vmin': 230, 'hmax': 179, 'smax': 255, 'vmax': 255}
+
+# image processing
+def image_data(client_id):
+	a = 0
+	b = 0
+	#thresholvalues
+	hsvVals = {'hmin': 0, 'smin': 0, 'vmin': 230, 'hmax': 179, 'smax': 255, 'vmax': 255} 
+    # getting data from coppeliasim camera
 	res, v1 = sim.simxGetObjectHandle(client_id, 'camera', sim.simx_opmode_oneshot_wait)
 	err, resolution, image = sim.simxGetVisionSensorImage(client_id, v1, 0, sim.simx_opmode_streaming)
 	img = np.array(image,dtype=np.uint8)
 	img.resize(256,256,3)
 	img = cv2.flip(img,0)
 	img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+    # circular mask
 	circle= np.zeros((img.shape[0],img.shape[1]), dtype="uint8")
 	cir = cv2.circle(circle,(img.shape[0]//2,img.shape[1]+120),img.shape[1]-70,(255,255,255),10)
 	
 	while (sim.simxGetConnectionId(client_id) != -1):
 		err, resolution, image = sim.simxGetVisionSensorImage(client_id, v1, 0, sim.simx_opmode_buffer)
 		if err == sim.simx_return_ok:
-			# print("image OK!!!")
-			img = np.array(image,dtype=np.uint8)
+			img = np.array(image,dtype=np.uint8)	
 			img.resize([resolution[1],resolution[0],3])
 			img = cv2.flip(img,0)
 			img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 			imgColor , mask = threaholding(hsvVals,img)
 			
-
+            # masking path and circular arc
 			I = cv2.bitwise_and(mask,cir)
 			biggest, cx, cy = draw_contours(I)
 			cv2.drawContours(img,biggest,-1,(255,0,255),7)
-			cv2.circle(I,(cx,cy),10,(0,255,0),cv2.FILLED)
+			cv2.circle(img,(cx,cy),10,(0,255,0),cv2.FILLED)
 			x = I.shape[0]//2
 			y = I.shape[1]
+            # heading angle
 			w_rot = np.arctan((x-cx)/(y-cy))
-			pid = PID(kp,ki,kd,setpoint=w_rot)
-			pid.sample_time = 0.01
-			w = pid(w)
 			cv2.circle(I,(I.shape[0]//2,I.shape[1]),10,(255,0,0),cv2.FILLED)
 			cv2.imshow('ima',img)
 			cv2.imshow('image',I)
-			print(w_rot,w)
-			n = f(abs(w_rot))
-			# if abs(w_rot)<= 0.85:
-			# 	n = 8
-			# 	m = 0.7
-			# elif abs(w_rot)>0.85 and abs(w_rot)<=1.2:
-			# 	n = 5
-			# else:
-			# 	n = 2
-			set_bot_movement(client_id, init_setup(client_id),-n,0,w)
+			a= abs(np.rad2deg(w_rot))
+			if a<=30:
+				n = 7
+				m = 0.5
+			elif a>20 and a<=50:
+				n = 5
+				m = 1.2
+			elif a>50 and a<=70:
+				n = 4
+				m = 1.8
+			else:
+				m = 0.8
+				n= 2
+			print(a)
+			set_bot_movement(client_id,init_setup(client_id),-n,0,m*w_rot)
 			if cv2.waitKey(1) & 0xFF == ord('q'):
 				break
 		elif err == sim.simx_return_novalue_flag:
@@ -147,13 +145,16 @@ def image_data(client_id):
 		else:
 			print(err)
 
-cv2.destroyAllWindows()
+	cv2.destroyAllWindows()
 
+
+# to segment the red path
 def threaholding(hsvVals,img):
 	myColorFinder = ColorFinder(False)
 	imgColor, mask = myColorFinder.update(img, hsvVals)
 	return imgColor , mask
-	
+
+# returns the centre of the biggest contour found
 def draw_contours(mask):
 	contours , hierarchy = cv2.findContours(mask,cv2.RETR_EXTERNAL,cv2.CHAIN_APPROX_NONE)
 	biggest = max(contours, key = cv2.contourArea)
@@ -162,9 +163,6 @@ def draw_contours(mask):
 	cy = y + h//2
 	return biggest,cx,cy
 
-def heading(mask,rect):
-	I = cv2.bitwise_and(mask,rect)
-	
 
 
 if __name__ == "__main__":
